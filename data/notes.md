@@ -1,0 +1,1 @@
+torch torchvision torchaudio transformers datasets evaluate accelerate peft sec-edgar-downloader beautifulsoup4 lxml html5lib scikit-learn matplotlib tqdm python-dotenv
