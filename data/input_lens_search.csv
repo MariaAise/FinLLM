@@ -1,0 +1,6 @@
+filter,value
+keywords,financial LLM AND (sentiment OR forecasting)
+year_start,2020
+year_end,2025
+publication_type,journal article; preprint; conference proceedings article
+open_access,true

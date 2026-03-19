@@ -1,0 +1,31 @@
+# Environment
+.env
+.venv/
+__pycache__/
+*.pyc
+.DS_Store
+
+# IDE
+.vscode/
+.idea/
+
+# Data - large files (tracked via manifests, not git)
+data/papers/
+data/raw/*.csv
+data/processed/*.csv
+data/vectorstore/
+
+# Keep config and documentation
+!data/input_stream_a.csv
+!data/input_stream_b.csv
+!data/input_lens_search.csv
+!data/query_documentation.md
+
+# uv
+uv.lock
+
+# SEC EDGAR raw filings
+data/raw/sec-edgar-filings/
+
+# Jupyter
+.ipynb_checkpoints/
