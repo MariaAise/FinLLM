@@ -9,17 +9,11 @@ __pycache__/
 .vscode/
 .idea/
 
-# Data - large files (tracked via manifests, not git)
-data/papers/
-data/raw/*.csv
-data/processed/*.csv
-data/vectorstore/
+# Data — symlinked to external drive, not tracked
+data/
 
-# Keep config and documentation
-!data/input_stream_a.csv
-!data/input_stream_b.csv
-!data/input_lens_search.csv
-!data/query_documentation.md
+# Claude
+.claude/
 
 # uv
 uv.lock
