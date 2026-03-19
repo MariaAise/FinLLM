@@ -8,6 +8,12 @@ Outputs:
   - data/processed/failure_extractions/{lens_id}.json  (per-paper)
   - data/processed/stream_a_failure_modes.csv           (aggregate)
   - data/processed/stream_a_failure_clusters.csv        (clustered)
+
+v2 changes (2026-03-20):
+  - Tighter system prompt with explicit exclusion list
+  - Added evidence_type, trigger_or_condition, confidence fields
+  - Removed priority gate from Phase 1 (use as ranking signal only)
+  - Replaced queries with focused failure-evidence + finance-specific set
 """
 
 import argparse
@@ -27,25 +33,37 @@ VECTORSTORE_DIR = "data/vectorstore"
 EXTRACTIONS_DIR = "data/processed/failure_extractions"
 COLLECTION_NAME = "stream_a_papers"
 
-# Seed queries targeting failure content in financial LLM papers
+# Seed queries — focused on explicit failure evidence + finance-specific patterns
 SEED_QUERIES = [
-    "error analysis showing where the model failed on financial tasks",
-    "numerical reasoning mistakes in financial question answering",
-    "hallucination or factual errors in financial document analysis",
-    "model limitations on accounting and auditing tasks",
-    "performance breakdown by task type showing failure categories",
-    "incorrect extraction from financial tables or SEC filings",
-    "robustness failures when prompt or input format changes",
-    "bias in financial sentiment or risk assessment",
-    "wrong predictions on financial text classification",
-    "model struggles with multi-step financial reasoning",
+    # Explicit failure evidence
+    "error analysis financial task model failed",
+    "failure cases financial question answering",
+    "limitations and failure analysis in financial LLM evaluation",
+    "hallucination factual error financial documents",
+    "numerical reasoning errors financial QA",
+    "wrong extraction from financial tables or filings",
+    "performance breakdown showing failure patterns",
+    "qualitative examples of incorrect model outputs in finance",
+    # Finance-specific failure patterns
+    "temporal confusion fiscal year quarter financial reports",
+    "entity confusion across companies subsidiaries financial documents",
+    "hallucinated numbers or facts in SEC filing analysis",
 ]
 
-EXTRACTION_SYSTEM = """You are an expert at analyzing NLP/AI research papers about financial applications.
-Your task is to extract every failure mode, error pattern, or limitation reported in the provided text.
-Be specific and evidence-based. Only extract failures that are explicitly documented with evidence."""
+EXTRACTION_SYSTEM = """You are extracting documented failure evidence from research papers on language models in finance.
 
-EXTRACTION_PROMPT = """Below are excerpts from a research paper about LLMs applied to financial/accounting tasks.
+Your task is to identify only failures, errors, weaknesses, or limitations that are explicitly supported by evaluation results, benchmark comparisons, qualitative error examples, ablation findings, or author discussion grounded in results.
+
+Do not extract:
+- generic future work
+- unsupported speculation
+- broad statements that the task is challenging
+- purely methodological descriptions unless they reveal a model weakness
+- claims not tied to evidence in the provided text
+
+Prefer concrete, finance-specific failures over generic LLM weaknesses."""
+
+EXTRACTION_PROMPT = """Below are excerpts from a research paper about language models applied to financial or accounting tasks.
 
 Paper: {title}
 DOI: {doi}
@@ -54,33 +72,49 @@ DOI: {doi}
 {chunks_text}
 --- END EXCERPTS ---
 
-Extract every failure mode, error pattern, or limitation reported in these excerpts.
-For each one, provide:
+Extract only failure evidence that is explicitly documented in these excerpts.
 
-1. failure_category: a short descriptive label (e.g., "numerical reasoning error", "table structure misinterpretation", "temporal confusion")
+A valid extraction must satisfy at least one of the following:
+- reports an incorrect model behavior
+- reports poor or weaker performance on a specific task, input type, or data condition
+- reports hallucination, reasoning error, extraction error, temporal confusion, entity confusion, or similar failure
+- reports instability, brittleness, or robustness weakness
+- reports a limitation clearly tied to results or examples
+
+For each extracted item, return:
+
+1. failure_category: short normalized label (e.g., "numerical reasoning error", "table structure misinterpretation", "temporal confusion")
 2. description: 1-2 sentences explaining what goes wrong
-3. evidence: a direct quote or specific result from the paper (keep it concise)
-4. task_type: what financial task was being attempted (e.g., "financial QA", "sentiment analysis", "table extraction", "risk assessment")
-5. models_tested: which model(s) exhibited this failure (if stated)
-6. severity: how the authors characterize the severity (e.g., "major", "minor", "systematic", or quote their characterization)
+3. evidence_type: one of ["quantitative_result", "qualitative_example", "author_interpretation", "benchmark_comparison", "ablation_result"]
+4. evidence: concise direct quote or specific result from the paper
+5. task_type: financial task involved (e.g., "financial QA", "sentiment analysis", "table extraction", "risk assessment")
+6. trigger_or_condition: what condition exposed the failure, if stated (e.g., "long documents", "multi-step calculations", "cross-entity comparisons")
+7. models_tested: models exhibiting the failure, if stated
+8. severity: exact author wording if available, otherwise "not stated"
+9. confidence: "high" if explicit and direct, "medium" if clearly supported but indirect
 
-Return a JSON array of objects. If no failure modes are found, return an empty array [].
-Only include failures with clear evidence — do not speculate or infer failures not documented in the text."""
+Return a JSON array of objects. If no documented failure evidence is present, return [].
+
+Important rules:
+- do not merge distinct failures into one item
+- do not infer failures beyond the excerpt
+- do not extract generic statements like "the model has limitations" without evidence"""
 
 
 def get_candidate_papers(collection) -> dict[str, list]:
     """Phase 1: Query vectorstore with seed queries to find failure-related chunks.
 
+    Queries all chunks (no priority gate). Priority used as ranking signal.
     Returns dict mapping paper_id to list of relevant chunks.
     """
     paper_chunks = defaultdict(list)
     seen_chunk_ids = set()
 
     for query in SEED_QUERIES:
+        # Query without priority filter — all chunks are candidates
         results = collection.query(
             query_texts=[query],
-            n_results=30,
-            where={"priority": "high"},
+            n_results=40,
         )
 
         for doc, meta, dist, chunk_id in zip(
@@ -98,10 +132,10 @@ def get_candidate_papers(collection) -> dict[str, list]:
                     "query": query,
                 })
 
-    # Also get high-priority chunks from all papers (error_analysis, limitations sections)
+    # Also get chunks from error_analysis and limitations sections (any distance)
     results = collection.query(
         query_texts=["error analysis failure limitation"],
-        n_results=100,
+        n_results=200,
         where={"section_type": {"$in": ["error_analysis", "limitations"]}},
     )
 
@@ -132,15 +166,19 @@ def extract_from_paper(llm, paper_id: str, chunks: list, output_dir: str) -> lis
         with open(output_path) as f:
             return json.load(f)
 
-    # Sort chunks by relevance (distance), take top chunks
-    chunks_sorted = sorted(chunks, key=lambda c: c["distance"])[:10]
+    # Sort chunks: prefer high-priority sections, then by distance
+    def chunk_sort_key(c):
+        priority_boost = 0 if c["metadata"].get("priority") == "high" else 0.1
+        return c["distance"] + priority_boost
+
+    chunks_sorted = sorted(chunks, key=chunk_sort_key)[:12]
 
     # Build context
     title = chunks_sorted[0]["metadata"].get("title", "Unknown")
     doi = chunks_sorted[0]["metadata"].get("doi", "")
 
     chunks_text = ""
-    for i, chunk in enumerate(chunks_sorted):
+    for chunk in chunks_sorted:
         section = chunk["metadata"].get("section_type", "unknown")
         heading = chunk["metadata"].get("heading", "")
         chunks_text += f"\n[Section: {section} | {heading}]\n{chunk['text']}\n"
@@ -273,18 +311,21 @@ def main():
 
     llm = get_llm(model=args.model, temperature=args.temperature)
     all_failure_modes = []
+    json_errors = 0
 
     for paper_id, chunks in tqdm(papers_sorted, desc="Extracting"):
         try:
             modes = extract_from_paper(llm, paper_id, chunks, EXTRACTIONS_DIR)
             all_failure_modes.extend(modes)
-            # Brief pause to avoid overwhelming Ollama
             time.sleep(0.5)
         except Exception as e:
+            json_errors += 1
             print(f"\n  Error on {paper_id}: {e}")
             continue
 
     print(f"\nExtracted {len(all_failure_modes)} failure modes from {len(papers_sorted)} papers")
+    if json_errors:
+        print(f"  JSON/extraction errors: {json_errors} ({json_errors/len(papers_sorted)*100:.0f}%)")
 
     # Save aggregate CSV
     if all_failure_modes:

@@ -53,3 +53,17 @@ Committed as `6317ab7`.
 - `failure_mechanism` field separate from `failure_category`: Qwen 14B likely to blur the distinction, not worth the risk of malformed JSON
 
 **Risk:** 9 fields is upper limit for Qwen 14B. If malformed JSON rate exceeds ~10%, drop `confidence` first.
+
+## 2026-03-20 — Extraction pipeline v2 implemented
+
+**Changes applied to `src/extract_failure_modes.py`:**
+
+1. System prompt replaced — explicit exclusion list (no generic future work, unsupported speculation, broad "challenging" statements, methodological descriptions without weakness evidence)
+2. Extraction prompt now has 9 fields: failure_category, description, evidence_type, evidence, task_type, trigger_or_condition, models_tested, severity, confidence
+3. Phase 1 retrieval: removed `where={"priority": "high"}` gate. All chunks are now candidates. Priority used as ranking boost when sorting chunks for extraction context. Section filter query expanded to n_results=200.
+4. Queries replaced: 8 focused failure-evidence queries + 3 finance-specific (temporal confusion, entity confusion, hallucinated numbers). Total 11, down from 10 but more targeted.
+5. Chunk context per paper increased from 10 to 12 (to accommodate wider retrieval).
+
+**v1 cached extractions deleted before re-run.** v1 results preserved in git history (`6317ab7`).
+
+**Comparison target:** v1 yielded 336 failure modes from 144 papers, 25 clusters. v2 should show: more papers (closer to 249), fewer but higher-quality extractions, better cluster separation.
