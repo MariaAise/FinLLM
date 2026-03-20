@@ -52,16 +52,23 @@ SEED_QUERIES = [
 
 EXTRACTION_SYSTEM = """You are extracting documented failure evidence from research papers on language models in finance.
 
-Your task is to identify only failures, errors, weaknesses, or limitations that are explicitly supported by evaluation results, benchmark comparisons, qualitative error examples, ablation findings, or author discussion grounded in results.
+Your task is to identify failures, errors, weaknesses, or limitations that are supported by evidence in the text. Valid evidence includes:
+- quantitative results showing poor or degraded performance
+- error case studies or qualitative examples of wrong model outputs
+- benchmark comparisons where a model underperforms
+- ablation results revealing brittleness or weakness
+- author analysis explaining why or where a model fails
+- confusion matrices, error breakdowns, or per-category performance gaps
 
 Do not extract:
-- generic future work
+- generic future work suggestions
 - unsupported speculation
-- broad statements that the task is challenging
-- purely methodological descriptions unless they reveal a model weakness
+- broad statements that the task is "challenging" without specific evidence
+- purely methodological descriptions that do not reveal a model weakness
 - claims not tied to evidence in the provided text
 
-Prefer concrete, finance-specific failures over generic LLM weaknesses."""
+Prefer concrete, finance-specific failures over generic LLM weaknesses.
+When in doubt about whether something counts as failure evidence, extract it with confidence "medium"."""
 
 EXTRACTION_PROMPT = """Below are excerpts from a research paper about language models applied to financial or accounting tasks.
 
@@ -75,11 +82,13 @@ DOI: {doi}
 Extract only failure evidence that is explicitly documented in these excerpts.
 
 A valid extraction must satisfy at least one of the following:
-- reports an incorrect model behavior
+- reports an incorrect model behavior or a concrete error case study
 - reports poor or weaker performance on a specific task, input type, or data condition
-- reports hallucination, reasoning error, extraction error, temporal confusion, entity confusion, or similar failure
+- reports hallucination, reasoning error, extraction error, temporal confusion, entity confusion, semantic ambiguity, or similar failure
+- shows a confusion between similar concepts, categories, or entities
 - reports instability, brittleness, or robustness weakness
 - reports a limitation clearly tied to results or examples
+- presents a qualitative example of a wrong model output (even a single example counts)
 
 For each extracted item, return:
 

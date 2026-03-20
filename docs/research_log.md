@@ -67,3 +67,27 @@ Committed as `6317ab7`.
 **v1 cached extractions deleted before re-run.** v1 results preserved in git history (`6317ab7`).
 
 **Comparison target:** v1 yielded 336 failure modes from 144 papers, 25 clusters. v2 should show: more papers (closer to 249), fewer but higher-quality extractions, better cluster separation.
+
+## 2026-03-20 — v2 sample results and quality audit
+
+**v2.0 sample (10 papers):** 26 failure modes, 5 clusters. Phase 1 now finds 181 candidates (up from 144).
+
+**v2.1 prompt adjustment:** Added explicit guidance that error case studies, qualitative examples, confusion matrices, and per-category performance gaps count as valid evidence. Added "when in doubt, extract with confidence medium" to reduce false negatives.
+
+**v2.1 sample (10 papers):** 22 failure modes, 5 clusters. 4 papers returned empty [].
+
+**Quality audit on 4 papers (2 empty, 2 non-empty):**
+
+| Paper | v2.1 Result | Actual content | Assessment |
+|-------|-------------|----------------|------------|
+| FinTagging (074) | 0 modes | Has concrete DeepSeek-V3 error case for GAAP concept confusion | **False negative** — error case buried in chunk that's 90% prompt templates |
+| FinDABench (107) | 0 modes | Generic "insufficient data coverage" limitations | **Correct reject** |
+| FinanceReasoning (167) | 2 modes (duplicates) | Has 4-type error taxonomy from 80 DeepSeek-R1 failure cases | **Under-extracted** — missed error taxonomy |
+| FinMaster (196) | 5 modes (all "numerical reasoning error") | Has multi-type error taxonomy (Record/Calculation/Mismatch errors) | **Under-extracted, no diversity** — collapsed distinct categories |
+
+**Root cause:** Qwen 2.5 14B limitations:
+1. Cannot extract signal from noisy chunks (prompt templates mixed with error analysis)
+2. Collapses distinct error categories into generic "numerical reasoning error"
+3. Produces duplicate extractions for the same failure
+
+**Decision:** Compare Qwen 2.5 14B vs Gemini 2.0 Flash on the same 4 papers. If Gemini significantly outperforms, consider using it for the full run (API cost ~$1-2 for 181 papers). Created `src/compare_models.py` for reproducible comparison.

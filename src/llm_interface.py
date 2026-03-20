@@ -83,7 +83,7 @@ class GeminiLLM(LLMInterface):
 
     def __init__(self, model: str = "gemini-2.0-flash", temperature: float = 0.1):
         from google import genai
-        api_key = os.environ.get("GOOGLE_API_KEY") or os.environ.get("GEMINI_API_KEY")
+        api_key = os.environ.get("GOOGLE_API_KEY") or os.environ.get("GEMINI_API_KEY") or os.environ.get("GEMINI")
         if not api_key:
             raise ValueError("Set GOOGLE_API_KEY or GEMINI_API_KEY environment variable")
         self.client = genai.Client(api_key=api_key)
