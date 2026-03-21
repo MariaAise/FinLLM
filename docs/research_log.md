@@ -90,4 +90,55 @@ Committed as `6317ab7`.
 2. Collapses distinct error categories into generic "numerical reasoning error"
 3. Produces duplicate extractions for the same failure
 
-**Decision:** Compare Qwen 2.5 14B vs Gemini 2.0 Flash on the same 4 papers. If Gemini significantly outperforms, consider using it for the full run (API cost ~$1-2 for 181 papers). Created `src/compare_models.py` for reproducible comparison.
+**Decision:** Compare Qwen 2.5 14B vs Gemini on the same 4 papers. Created `src/compare_models.py` for reproducible comparison.
+
+## 2026-03-21 — Model comparison: Qwen 2.5 14B vs Gemini 3 Flash Preview
+
+Ran identical extraction (same prompts, same chunks) on 4 test papers.
+
+### Results
+
+| Paper | Qwen 14B | Gemini 3 Flash |
+|-------|----------|----------------|
+| FinTagging (noisy chunk with error case) | 0 modes, 52s | 5 modes, 15s |
+| FinDABench (initially expected empty) | 0 modes, 34s | 4 modes, 23s |
+| FinanceReasoning (4-type error taxonomy) | 2 modes (duplicates), 54s | 8 modes (diverse), 18s |
+| FinMaster (multi-type error taxonomy) | 7 modes (all same category), 106s | 14 modes (14 distinct categories), 28s |
+
+### Key findings
+
+**Qwen 2.5 14B weaknesses:**
+- Cannot extract signal from noisy chunks (FinTagging: error case buried in prompt templates → 0 extractions)
+- Collapses distinct error categories into "numerical reasoning error" (FinMaster: 7 modes all same label)
+- Produces duplicates (FinanceReasoning: 2 identical entries)
+- Misses concrete qualitative examples (FinDABench: entity hallucination example ignored)
+
+**Gemini 3 Flash Preview strengths:**
+- Extracts from noisy chunks successfully (FinTagging: found semantic ambiguity, concept differentiation failure)
+- Preserves paper's own error taxonomy (FinMaster: 14 distinct categories including arithmetic, data parsing, concept confusion, hallucination)
+- Finds concrete qualitative examples (FinDABench: entity extraction hallucination — model confused "Rongxin Group" with "Unicredit China")
+- 3-4x faster per paper
+
+**Gemini 3 Flash Preview concerns:**
+- May over-extract: FinDABench was initially assessed as "generic limitations only" but Gemini found 4 modes including a concrete entity hallucination example. Re-assessment: the paper does contain failure evidence that Qwen missed entirely. Not over-extraction — better recall.
+- All confidence ratings are "high" — may not be discriminating enough. Need to verify on papers with genuinely no failure content.
+- Free tier has daily quota limits (Gemini 2.0 Flash quota exhausted during testing, switched to Gemini 3 Flash Preview).
+
+### Performance comparison (per paper)
+
+| Metric | Qwen 14B | Gemini 3 Flash |
+|--------|----------|----------------|
+| Avg modes/paper | 2.3 | 7.8 |
+| Avg time/paper | 61s | 21s |
+| Distinct categories | 1 | 31 |
+| False negatives | 2/4 papers | 0/4 papers |
+| Cost | $0 (local) | Free tier (quota limited) |
+
+### Decision
+
+Gemini 3 Flash Preview is substantially better for this task. Options:
+1. Use Gemini for full run if quota allows (~181 papers)
+2. Use Gemini for a larger sample, then decide
+3. Paid Gemini API if free tier insufficient (~$1-2 total)
+
+Raw comparison data saved in `data/processed/model_comparison/`.

@@ -37,7 +37,7 @@ TEST_PAPERS = {
 
 MODELS = [
     ("qwen2.5:14b-instruct", "Qwen 2.5 14B (Ollama, local)"),
-    ("gemini-2.0-flash", "Gemini 2.0 Flash (API, free tier)"),
+    ("gemini-3-flash-preview", "Gemini 3 Flash Preview (API, free tier)"),
 ]
 
 OUTPUT_DIR = "data/processed/model_comparison"
