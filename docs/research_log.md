@@ -21,12 +21,23 @@ Chronological record of research design decisions, pipeline changes, and rationa
 ## 2026-03-19 — Pipeline implementation (v1 extraction)
 
 - `parse_papers.py`: 249 Stream A PDFs → 5377 chunks (1289 high-priority)
-- `build_vectorstore.py`: ChromaDB with all-MiniLM-L6-v2 embeddings
+- `build_vectorstore.py`: ChromaDB with all-MiniLM-L6-v2 embeddings, cosine similarity, persistent at `data/vectorstore/`
 - `llm_interface.py`: Ollama (qwen2.5:14b-instruct) as default backend
 - `extract_failure_modes.py`: seed query retrieval → LLM extraction → agglomerative clustering
 - Data moved to external drive (`/Volumes/Crucial X9/paper_datasets/finllm/data/`), symlinked back
 
-**First full run results:** 336 failure modes from 144/249 papers, 25 clusters. Dominant cluster: "numerical reasoning error" (144 instances, 50 papers) — likely over-merged.
+**First full run results:** 336 failure modes from 144/249 papers, 25 clusters. Dominant cluster: "numerical reasoning error" (144 instances, 50 papers — 43% of all modes).
+
+**Cluster breakdown (25 clusters):**
+- numerical reasoning error: 144 instances, 50 papers (dominant — likely over-merged)
+- performance degradation: 31, 19 papers
+- data bias: 27, 21 papers
+- generalizability: 24, 14 papers
+- dataset limitation: 20, 20 papers
+- hallucinations: 12, 12 papers
+- High-precision Computational Distortion, over reliance, token_ceiling, isolated anomaly detection error, framework/API misuse, truthfulness, network/integration barriers, temporal aggregation gap, negative Sharpe ratio, under-fitting, table structure misinterpretation, unobservable_training_overlap, Multivariate Integrated Analysis Deviation (MIAD), statistical significance, domain knowledge gap, non-deterministic behavior, calling functions without providing required arguments, Cross-Lingual Adaptation Issues, input sensitivity
+
+**Cluster naming problem:** Many cluster names are LLM-generated artifacts rather than normalized taxonomy labels (e.g., "Multivariate Integrated Analysis Deviation", "High-precision Computational Distortion"). These need normalization in later iterations.
 
 **Issues identified:**
 - 82 of 331 filtered papers have no downloaded PDF (not a download error — papers were never fetched)
@@ -70,11 +81,17 @@ Committed as `6317ab7`.
 
 ## 2026-03-20 — v2 sample results and quality audit
 
-**v2.0 sample (10 papers):** 26 failure modes, 5 clusters. Phase 1 now finds 181 candidates (up from 144).
+**v2.0 sample (10 papers):** 26 failure modes, 9 clusters. Phase 1 now finds 181 candidates (up from 144).
+
+v2.0 cluster breakdown: numerical reasoning error (15), evidence attribution error (4), domain-specific knowledge gap (3), hallucination (2), critical data missing (2), unanswerable span misclassification (1), over reliance (1), isolated anomaly detection error (1), calling functions without providing required arguments (1).
 
 **v2.1 prompt adjustment:** Added explicit guidance that error case studies, qualitative examples, confusion matrices, and per-category performance gaps count as valid evidence. Added "when in doubt, extract with confidence medium" to reduce false negatives.
 
 **v2.1 sample (10 papers):** 22 failure modes, 5 clusters. 4 papers returned empty [].
+
+v2.1 cluster breakdown: numerical reasoning error (11), poor performance (8), data contamination (1), hallucination (1), irrelevant comments (1).
+
+**v2.1 overcorrection problem:** v2.1 had MORE false negatives than v2.0 despite prompt improvements intended to increase recall. The stricter prompt overcorrected — the explicit exclusion list reduced false positives but also suppressed legitimate extractions. Fewer clusters (5 vs 9) and fewer modes (22 vs 26) suggest the model became too conservative.
 
 **Quality audit on 4 papers (2 empty, 2 non-empty):**
 
@@ -145,17 +162,19 @@ Raw comparison data saved in `data/processed/model_comparison/`.
 
 ### Detailed extraction comparison (4 test papers)
 
-**Paper 1: FinTagging — Benchmarking LLMs for Extracting and Structuring Financial Information**
+**Paper 1: FinTagging (074-042-452-083-012) — Benchmarking LLMs for Extracting and Structuring Financial Information**
 
 | | Qwen 2.5 14B | Gemini 3 Flash Preview |
 |---|---|---|
 | Modes | 0 | 5 |
 | Time | 52s | 15s |
 | Categories | — | semantic ambiguity error, fine-grained concept differentiation failure, performance collapse in full-taxonomy settings, knowledge-alignment gap, structure-aware reasoning deficiency |
+| Confidence | — | all high |
+| Evidence types | — | qualitative_example (2), ablation_result (1), quantitative_result (1), author_interpretation (1) |
 
-Context: Error analysis section contains a concrete case where DeepSeek-V3 confuses semantically similar US-GAAP taxonomy concepts (e.g., restricted cash classification). The chunk is ~90% prompt templates with the error case in the first 4 sentences. Qwen could not extract signal from noise. Gemini identified 5 distinct failure patterns.
+Context: Chunk 21 (error_analysis section) contains a concrete DeepSeek-V3 error case for GAAP concept confusion, but the chunk is ~90% prompt templates with the error case in the first 4 sentences. Qwen could not extract signal from noise. Gemini identified 5 distinct failure patterns.
 
-**Paper 2: FinDABench — Benchmarking Financial Data Analysis Ability of Large Language Models**
+**Paper 2: FinDABench (107-232-497-691-567) — Benchmarking Financial Data Analysis Ability of Large Language Models**
 
 | | Qwen 2.5 14B | Gemini 3 Flash Preview |
 |---|---|---|
@@ -163,9 +182,9 @@ Context: Error analysis section contains a concrete case where DeepSeek-V3 confu
 | Time | 34s | 23s |
 | Categories | — | poor benchmark performance, entity extraction hallucination, reasoning and technical skill deficiency, metric-performance gap |
 
-Context: Initially assessed as "correct reject" (generic limitations). Gemini found concrete evidence: entity hallucination where model confused "Rongxin Group" with "Unicredit China" despite explicit text. Also found quantitative evidence of poor performance across 41 models. Re-assessment: the paper does contain extractable failure evidence.
+Context: Initially assessed as "correct reject" (generic limitations only). Reassessed after Gemini found concrete evidence: entity hallucination where the model confused "Rongxin Group" with "Unicredit China" despite explicit text — a concrete qualitative example Qwen missed entirely. Also found quantitative evidence of poor performance across 41 models. Re-assessment: the paper does contain extractable failure evidence. This is not over-extraction — it is better recall.
 
-**Paper 3: FinanceReasoning — Benchmarking Financial Numerical Reasoning**
+**Paper 3: FinanceReasoning (167-398-185-509-339) — Benchmarking Financial Numerical Reasoning**
 
 | | Qwen 2.5 14B | Gemini 3 Flash Preview |
 |---|---|---|
@@ -173,9 +192,9 @@ Context: Initially assessed as "correct reject" (generic limitations). Gemini fo
 | Time | 54s | 18s |
 | Categories | numerical reasoning error (×2, same evidence) | domain knowledge deficit, formula application error, data extraction error, numerical calculation error, context distraction, semantic ambiguity, inference inefficiency, numerical precision error |
 
-Context: Paper documents 4 error types from 80 DeepSeek-R1 failure cases (Misunderstanding of Problem, Formula Application Error, Data Extraction Error, Numerical Calculation Error). Qwen collapsed these into 2 duplicate "numerical reasoning error" entries. Gemini recovered all 4 types plus additional findings from benchmark comparisons.
+Context: Paper documents 4 error types from 80 DeepSeek-R1 failure cases with stratified sampling (20 Easy / 20 Medium / 40 Hard). The paper's own error taxonomy: Misunderstanding of Problem, Formula Application Error, Data Extraction Error, Numerical Calculation Error. Qwen collapsed these into 2 duplicate "numerical reasoning error" entries. Gemini recovered all 4 of the paper's own categories plus found additional patterns from benchmark data (context distraction, semantic ambiguity, inference inefficiency, numerical precision error).
 
-**Paper 4: FinMaster — A Holistic Benchmark for Mastering Full-Pipeline Financial Workflows**
+**Paper 4: FinMaster (196-068-497-575-765) — A Holistic Benchmark for Mastering Full-Pipeline Financial Workflows**
 
 | | Qwen 2.5 14B | Gemini 3 Flash Preview |
 |---|---|---|
@@ -183,7 +202,7 @@ Context: Paper documents 4 error types from 80 DeepSeek-R1 failure cases (Misund
 | Time | 106s | 28s |
 | Categories | numerical reasoning error (×7) | domain knowledge deficiency, critical data omission, numerical precision error, logical inconsistency, performance degradation on complexity, hallucination, logical reasoning error, structural reasoning failure, multi-step reasoning error, financial concept confusion, arithmetic error, financial logic error, data parsing failure, modality limitation |
 
-Context: Paper has a multi-type error taxonomy (Record Error, Calculation Error, Mismatch Error, multi-error combinations). Qwen collapsed everything into "numerical reasoning error" — extracting 7 instances of the same label from different calculation discrepancies. Gemini preserved the paper's error diversity and added evidence from qualitative examples.
+Context: Paper has 68 chunks and a multi-type error taxonomy (Record Error, Calculation Error, Mismatch Error, multi-error combinations). Qwen collapsed everything into "numerical reasoning error" — extracting 7 instances of the same label from different calculation discrepancies. Gemini preserved the paper's error diversity and added evidence from qualitative examples.
 
 ### Decision: Use Gemini 3 Flash Preview for full extraction
 
@@ -197,3 +216,58 @@ Context: Paper has a multi-type error taxonomy (Record Error, Calculation Error,
 **Implementation:** Free tier with retry policy (15s initial delay, 6 attempts, exponential backoff). Script auto-detects daily quota exhaustion and can resume from cache on re-run. If daily quota caps at ~50 RPD, full run (181 papers) would take ~4 days. If quota is higher, could finish in one session.
 
 **Cost if paid:** ~$0.80 total (181 papers × ~6K input tokens × $0.50/1M + ~500 output tokens × $3.00/1M).
+
+### Pipeline configuration reference
+
+- **ChromaDB:** cosine similarity, all-MiniLM-L6-v2 embeddings, persistent at `data/vectorstore/`
+- **Phase 1 retrieval:** 11 seed queries × 40 results each + section filter (`error_analysis`, `limitations`) × 200 results, distance threshold 0.8
+- **Phase 2 context:** top 12 chunks per paper, sorted by priority-boosted distance
+- **Gemini retry config:** initial_delay=15s, max_delay=120s, exp_base=2, attempts=6, timeout=180s
+- **Data storage:** external drive (`/Volumes/Crucial X9/paper_datasets/finllm/data/`) symlinked to project `data/` directory
+
+## 2026-03-21 — First Gemini full run (free tier)
+
+Launched full extraction using Gemini 3 Flash Preview on all 181 candidate papers.
+
+**Run status:** Processed 17/181 papers before daily quota exhaustion.
+
+**Results from first 17 papers:**
+- 118 failure modes extracted (6.9 per paper average — consistent with 7.8 avg from 4-paper comparison)
+- 24 clusters generated
+
+**Full cluster list (17 papers):**
+
+| Cluster | Instances | Papers |
+|---------|-----------|--------|
+| numerical reasoning error | 37 | 13 |
+| reasoning consistency error | 13 | 9 |
+| performance degradation | 9 | 9 |
+| domain knowledge deficiency | 8 | 7 |
+| factual hallucination | 7 | 7 |
+| semantic ambiguity | 6 | 6 |
+| evidence attribution error | 4 | 2 |
+| contextual inconsistency | 4 | 4 |
+| multimodal processing limitation | 4 | 3 |
+| table structure misinterpretation | 3 | 3 |
+| retrieval-augmented generation failure | 3 | 3 |
+| regulatory non-compliance | 3 | 2 |
+| temporal confusion | 3 | 2 |
+| computational error propagation | 2 | 2 |
+| critical data omission | 2 | 2 |
+| output nondeterminism | 2 | 1 |
+| trend assessment error | 1 | 1 |
+| low zero-shot accuracy | 1 | 1 |
+| model refusal | 1 | 1 |
+| task-specific drift sensitivity | 1 | 1 |
+| security vulnerability | 1 | 1 |
+| benchmark data contamination | 1 | 1 |
+| ranking and ordering error | 1 | 1 |
+| overconfidence | 1 | 1 |
+
+**Notable new categories not seen in any Qwen run:** regulatory non-compliance, model refusal, RAG failure, output nondeterminism, security vulnerability, overconfidence. These suggest Gemini is recovering failure modes that Qwen systematically missed.
+
+**Performance:**
+- Rate: ~25s per paper, 5s inter-request delay for free tier
+- Cost estimate for remaining 164 papers: $0.98 (Gemini 3 Flash Preview) or $0.67 (Gemini 2.5 Flash)
+
+**Next step:** Resume extraction when quota resets. 164 papers remaining.
