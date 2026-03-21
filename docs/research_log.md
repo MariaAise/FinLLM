@@ -142,3 +142,58 @@ Gemini 3 Flash Preview is substantially better for this task. Options:
 3. Paid Gemini API if free tier insufficient (~$1-2 total)
 
 Raw comparison data saved in `data/processed/model_comparison/`.
+
+### Detailed extraction comparison (4 test papers)
+
+**Paper 1: FinTagging — Benchmarking LLMs for Extracting and Structuring Financial Information**
+
+| | Qwen 2.5 14B | Gemini 3 Flash Preview |
+|---|---|---|
+| Modes | 0 | 5 |
+| Time | 52s | 15s |
+| Categories | — | semantic ambiguity error, fine-grained concept differentiation failure, performance collapse in full-taxonomy settings, knowledge-alignment gap, structure-aware reasoning deficiency |
+
+Context: Error analysis section contains a concrete case where DeepSeek-V3 confuses semantically similar US-GAAP taxonomy concepts (e.g., restricted cash classification). The chunk is ~90% prompt templates with the error case in the first 4 sentences. Qwen could not extract signal from noise. Gemini identified 5 distinct failure patterns.
+
+**Paper 2: FinDABench — Benchmarking Financial Data Analysis Ability of Large Language Models**
+
+| | Qwen 2.5 14B | Gemini 3 Flash Preview |
+|---|---|---|
+| Modes | 0 | 4 |
+| Time | 34s | 23s |
+| Categories | — | poor benchmark performance, entity extraction hallucination, reasoning and technical skill deficiency, metric-performance gap |
+
+Context: Initially assessed as "correct reject" (generic limitations). Gemini found concrete evidence: entity hallucination where model confused "Rongxin Group" with "Unicredit China" despite explicit text. Also found quantitative evidence of poor performance across 41 models. Re-assessment: the paper does contain extractable failure evidence.
+
+**Paper 3: FinanceReasoning — Benchmarking Financial Numerical Reasoning**
+
+| | Qwen 2.5 14B | Gemini 3 Flash Preview |
+|---|---|---|
+| Modes | 2 (duplicates) | 8 (diverse) |
+| Time | 54s | 18s |
+| Categories | numerical reasoning error (×2, same evidence) | domain knowledge deficit, formula application error, data extraction error, numerical calculation error, context distraction, semantic ambiguity, inference inefficiency, numerical precision error |
+
+Context: Paper documents 4 error types from 80 DeepSeek-R1 failure cases (Misunderstanding of Problem, Formula Application Error, Data Extraction Error, Numerical Calculation Error). Qwen collapsed these into 2 duplicate "numerical reasoning error" entries. Gemini recovered all 4 types plus additional findings from benchmark comparisons.
+
+**Paper 4: FinMaster — A Holistic Benchmark for Mastering Full-Pipeline Financial Workflows**
+
+| | Qwen 2.5 14B | Gemini 3 Flash Preview |
+|---|---|---|
+| Modes | 7 (all same category) | 14 (14 distinct) |
+| Time | 106s | 28s |
+| Categories | numerical reasoning error (×7) | domain knowledge deficiency, critical data omission, numerical precision error, logical inconsistency, performance degradation on complexity, hallucination, logical reasoning error, structural reasoning failure, multi-step reasoning error, financial concept confusion, arithmetic error, financial logic error, data parsing failure, modality limitation |
+
+Context: Paper has a multi-type error taxonomy (Record Error, Calculation Error, Mismatch Error, multi-error combinations). Qwen collapsed everything into "numerical reasoning error" — extracting 7 instances of the same label from different calculation discrepancies. Gemini preserved the paper's error diversity and added evidence from qualitative examples.
+
+### Decision: Use Gemini 3 Flash Preview for full extraction
+
+**Rationale:**
+1. 3.4x more failure modes per paper (7.8 vs 2.3) with meaningful diversity
+2. 0 false negatives vs 2/4 missed by Qwen
+3. 3x faster (21s vs 61s per paper)
+4. Preserves papers' own error taxonomies instead of collapsing them
+5. Finds concrete qualitative examples that Qwen ignores
+
+**Implementation:** Free tier with retry policy (15s initial delay, 6 attempts, exponential backoff). Script auto-detects daily quota exhaustion and can resume from cache on re-run. If daily quota caps at ~50 RPD, full run (181 papers) would take ~4 days. If quota is higher, could finish in one session.
+
+**Cost if paid:** ~$0.80 total (181 papers × ~6K input tokens × $0.50/1M + ~500 output tokens × $3.00/1M).
