@@ -271,3 +271,69 @@ Launched full extraction using Gemini 3 Flash Preview on all 181 candidate paper
 - Cost estimate for remaining 164 papers: $0.98 (Gemini 3 Flash Preview) or $0.67 (Gemini 2.5 Flash)
 
 **Next step:** Resume extraction when quota resets. 164 papers remaining.
+
+## 2026-03-21 — Full Gemini extraction (paid tier)
+
+Added billing to Google AI Studio. Cleared cached extractions and re-ran full extraction on all 181 candidate papers.
+
+**Run completed successfully:** 181/181 papers processed, 0 errors, 0 rate limit hits.
+
+**Results:** 645 failure modes from 181 papers, 25 clusters.
+
+| Cluster | Instances | Papers |
+|---------|-----------|--------|
+| numerical reasoning error | 258 | 110 |
+| benchmark underperformance | 89 | 64 |
+| information extraction error | 48 | 31 |
+| evaluation bias | 39 | 26 |
+| hallucination | 35 | 34 |
+| context window limitation | 25 | 22 |
+| robustness weakness | 22 | 18 |
+| temporal confusion | 21 | 21 |
+| instruction following failure | 14 | 11 |
+| regulatory non-compliance | 13 | 10 |
+| model alignment failure | 12 | 10 |
+| output instability | 11 | 11 |
+| input length limitation | 8 | 8 |
+| prompt sensitivity | 7 | 7 |
+| evaluation metric insensitivity | 7 | 7 |
+| chart type sensitivity | 7 | 7 |
+| multi-turn compliance degradation | 7 | 7 |
+| schema coverage gap | 5 | 4 |
+| incorrect factor weighting | 4 | 4 |
+| brittleness | 4 | 4 |
+| pipeline integration failure | 3 | 3 |
+| overgeneralization | 2 | 2 |
+| distributional shift | 2 | 2 |
+| backbone model dependency | 1 | 1 |
+| label confusion | 1 | 1 |
+
+**Comparison: Qwen v1 full run vs Gemini v2 full run**
+
+| Metric | Qwen 2.5 14B (v1) | Gemini 3 Flash Preview (v2) |
+|--------|--------------------|-----------------------------|
+| Papers processed | 144 / 249 | 181 / 249 |
+| Total failure modes | 336 | 645 |
+| Avg modes per paper | 2.3 | 3.6 |
+| Clusters | 25 | 25 |
+| Dominant cluster share | 43% (numerical reasoning) | 40% (numerical reasoning) |
+| Cluster label quality | Many LLM artifacts (e.g., "Multivariate Integrated Analysis Deviation") | Clean, interpretable labels |
+| Finance-specific clusters | Few | temporal confusion (21), regulatory non-compliance (13), multi-turn compliance degradation (7), chart type sensitivity (7) |
+| Zero-extraction papers | Not tracked | To be verified |
+| Runtime | ~2.5 hours | ~65 minutes |
+| Cost | $0 (local) | ~$1 (paid API) |
+
+**Key observations:**
+1. "Numerical reasoning error" still dominant at 40% — likely needs sub-clustering in taxonomy assembly phase
+2. The remaining 60% is well-distributed across 24 meaningful categories
+3. Finance-specific failure modes now visible: temporal confusion, regulatory non-compliance, multi-turn compliance degradation, chart type sensitivity, schema coverage gap
+4. Cluster labels are clean and interpretable — no LLM naming artifacts
+5. 181 vs 144 papers: Gemini processed 37 more papers (recovered by removing priority gate in Phase 1)
+6. 68 papers in the vectorstore (249 - 181) still not reached by any seed query — these may not contain failure-relevant content
+
+**Stream A extraction is complete.** This is the checkpoint before proceeding to Stream B.
+
+**Output files:**
+- `data/processed/failure_extractions/{lens_id}.json` — per-paper extractions (181 files)
+- `data/processed/stream_a_failure_modes.csv` — aggregate (645 rows)
+- `data/processed/stream_a_failure_clusters.csv` — clustered (645 rows with cluster assignments)
