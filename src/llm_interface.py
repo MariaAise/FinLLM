@@ -79,14 +79,31 @@ class OllamaLLM(LLMInterface):
 
 
 class GeminiLLM(LLMInterface):
-    """Google Gemini API backend."""
+    """Google Gemini API backend with retry and rate limit handling."""
 
     def __init__(self, model: str = "gemini-2.0-flash", temperature: float = 0.1):
         from google import genai
+        from google.genai import types
+
         api_key = os.environ.get("GOOGLE_API_KEY") or os.environ.get("GEMINI_API_KEY") or os.environ.get("GEMINI")
         if not api_key:
-            raise ValueError("Set GOOGLE_API_KEY or GEMINI_API_KEY environment variable")
-        self.client = genai.Client(api_key=api_key)
+            raise ValueError("Set GOOGLE_API_KEY, GEMINI_API_KEY, or GEMINI environment variable")
+
+        # Configure retry: longer delays to respect free tier rate limits
+        # SDK default burns through 5 retries in ~33s ignoring server retryDelay
+        self.client = genai.Client(
+            api_key=api_key,
+            http_options=types.HttpOptions(
+                retry_options=types.HttpRetryOptions(
+                    initial_delay=15.0,   # start at 15s (free tier often says "retry in 12s")
+                    max_delay=120.0,      # cap at 2 min
+                    exp_base=2,           # 15s, 30s, 60s, 120s
+                    attempts=6,           # 6 attempts before giving up
+                    http_status_codes=[429, 500, 502, 503, 504],
+                ),
+                timeout=180 * 1000,       # 3 min timeout per request
+            ),
+        )
         self.model = model
         self.temperature = temperature
 

@@ -321,20 +321,74 @@ def main():
     llm = get_llm(model=args.model, temperature=args.temperature)
     all_failure_modes = []
     json_errors = 0
+    rate_limit_hits = 0
+    daily_quota_hit = False
+    processed = 0
+    skipped_cached = 0
+
+    # Determine inter-request delay based on model type
+    if args.model.startswith("gemini"):
+        inter_delay = 5.0   # 5s between requests for free tier
+    else:
+        inter_delay = 0.5   # local models need minimal delay
 
     for paper_id, chunks in tqdm(papers_sorted, desc="Extracting"):
+        # Check if already cached
+        cache_path = os.path.join(EXTRACTIONS_DIR, f"{paper_id}.json")
+        if os.path.exists(cache_path):
+            import json as _json
+            with open(cache_path) as _f:
+                cached = _json.load(_f)
+            all_failure_modes.extend(cached)
+            skipped_cached += 1
+            continue
+
         try:
             modes = extract_from_paper(llm, paper_id, chunks, EXTRACTIONS_DIR)
             all_failure_modes.extend(modes)
-            time.sleep(0.5)
+            processed += 1
+            time.sleep(inter_delay)
         except Exception as e:
-            json_errors += 1
-            print(f"\n  Error on {paper_id}: {e}")
+            err_str = str(e)
+            if "429" in err_str or "RESOURCE_EXHAUSTED" in err_str:
+                rate_limit_hits += 1
+                if "per_day" in err_str.lower() or "PerDay" in err_str:
+                    daily_quota_hit = True
+                    print(f"\n  Daily quota exhausted after {processed} papers.")
+                    print(f"  Quota resets at midnight Pacific Time.")
+                    print(f"  Re-run this command to continue (cached papers will be skipped).")
+                    break
+                else:
+                    # Per-minute limit — wait and retry once
+                    print(f"\n  Rate limited on {paper_id}, waiting 60s...")
+                    time.sleep(60)
+                    try:
+                        modes = extract_from_paper(llm, paper_id, chunks, EXTRACTIONS_DIR)
+                        all_failure_modes.extend(modes)
+                        processed += 1
+                    except Exception as e2:
+                        json_errors += 1
+                        print(f"\n  Retry failed on {paper_id}: {e2}")
+            else:
+                json_errors += 1
+                print(f"\n  Error on {paper_id}: {e}")
             continue
 
-    print(f"\nExtracted {len(all_failure_modes)} failure modes from {len(papers_sorted)} papers")
+    total = len(papers_sorted)
+    remaining = total - processed - skipped_cached
+    print(f"\nExtracted {len(all_failure_modes)} failure modes")
+    print(f"  Processed: {processed} papers (new)")
+    print(f"  Cached: {skipped_cached} papers (skipped)")
+    print(f"  Remaining: {remaining} papers")
     if json_errors:
-        print(f"  JSON/extraction errors: {json_errors} ({json_errors/len(papers_sorted)*100:.0f}%)")
+        print(f"  Errors: {json_errors}")
+    if rate_limit_hits:
+        print(f"  Rate limit hits: {rate_limit_hits}")
+    if daily_quota_hit:
+        print(f"\n  *** Daily quota reached. Re-run tomorrow to process remaining {remaining} papers. ***")
+    if remaining > 0 and not daily_quota_hit:
+        est_time = remaining * (inter_delay + 25)  # ~25s per Gemini call + delay
+        print(f"  Estimated time for remaining: {est_time/60:.0f} min")
 
     # Save aggregate CSV
     if all_failure_modes:
