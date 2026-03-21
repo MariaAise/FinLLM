@@ -24,6 +24,9 @@ import time
 from collections import defaultdict
 
 import chromadb
+from dotenv import load_dotenv
+
+load_dotenv()
 import pandas as pd
 from tqdm import tqdm
 
