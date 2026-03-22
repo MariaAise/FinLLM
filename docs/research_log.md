@@ -337,3 +337,78 @@ Added billing to Google AI Studio. Cleared cached extractions and re-ran full ex
 - `data/processed/failure_extractions/{lens_id}.json` — per-paper extractions (181 files)
 - `data/processed/stream_a_failure_modes.csv` — aggregate (645 rows)
 - `data/processed/stream_a_failure_clusters.csv` — clustered (645 rows with cluster assignments)
+
+## 2026-03-22 — Quality review: code-level and LLM-specific extraction risks
+
+Systematic review of the extraction pipeline code (`extract_failure_modes.py`, `llm_interface.py`, `compare_models.py`) for quality issues beyond the four user-identified concerns (omission, misclassification, granularity, noise).
+
+### Code-level issues identified
+
+1. **`extract_json` silent failure** — If LLM returns malformed JSON, `extract_json()` returns `[]` silently. Indistinguishable from a paper that genuinely has no failure evidence. Risk: unknown number of papers may have extraction failures masked as "no failures found."
+
+2. **Gemini system prompt handling** — `GeminiLLM.generate()` concatenates system and user prompts as a single string (`f"{system}\n\n{prompt}"`), unlike Ollama which uses proper role-based messages. Gemini may weight system instructions differently when they appear as user text vs a system instruction parameter. Extraction behavior may subtly differ from what the prompt engineering intended.
+
+3. **Chunk text truncation risk** — Phase 2 takes top 12 chunks per paper with no token budget check. Papers with long chunks could exceed the model's effective context window, causing the LLM to ignore later chunks or degrade extraction quality on them. The 12-chunk cap is arbitrary and not validated against actual token counts.
+
+4. **Priority boost is tiny** — `chunk_sort_key` adds 0.1 to distance for non-high-priority chunks. Since cosine distances in the store range ~0.3–0.8, this boost barely affects sort order. A chunk at distance 0.35 (non-priority) still ranks above a chunk at distance 0.46 (high-priority). The boost is cosmetic rather than functional.
+
+5. **Section filter query text mismatch** — The section filter query uses `"error analysis failure limitation"` as query text but filters to `section_type in [error_analysis, limitations]`. The query text influences which chunks among those sections are returned first (via `n_results=200` cap). A more neutral query or no query text would be more appropriate since the section filter already targets the right content.
+
+### LLM-specific extraction risks
+
+6. **Category label drift** — Gemini generates free-text `failure_category` labels. The same failure may get different labels across papers (e.g., "numerical calculation error" vs "arithmetic error" vs "computational error"). Clustering partially addresses this, but agglomerative clustering on label embeddings may miss semantic equivalences or create false separations.
+
+7. **Confidence field unreliable** — In the 4-paper comparison test, Gemini assigned "high" confidence to every extraction. The confidence field may not discriminate between strong and weak evidence, reducing its utility for QA filtering.
+
+8. **Cross-chunk synthesis gaps** — The extraction prompt shows chunks in sequence but doesn't explicitly instruct the LLM to synthesize across chunks. If a failure description spans two chunks (e.g., error category defined in methods, evidence in results), the LLM may extract partial information or miss the connection.
+
+9. **Position bias** — LLMs exhibit primacy/recency bias. Chunks sorted by distance appear in a fixed order. Failure evidence in later chunks (positions 8-12) may receive less attention than evidence in early chunks (positions 1-3), even if equally important.
+
+### Structural / pipeline risks
+
+10. **No deduplication across papers** — If multiple papers report the same failure (e.g., GPT-4 poor at numerical reasoning), each paper generates separate extractions. The clustering step groups by category label similarity but doesn't deduplicate identical findings. The aggregate CSV may overcount prevalent failure modes.
+
+11. **Clustering on labels only** — Agglomerative clustering uses only the `failure_category` text embedding, ignoring `description`, `task_type`, and `evidence_type`. Two extractions with different labels but identical descriptions end up in different clusters. Conversely, two with similar labels but different actual failures merge.
+
+12. **68 papers never queried** — 249 papers in vectorstore, only 181 reached by Phase 1. See investigation below.
+
+13. **No negative validation** — No mechanism to verify that papers returning `[]` genuinely lack failure content. The false negative rate is unknown beyond the 4-paper comparison test.
+
+14. **Cluster count formula is arbitrary** — `n_clusters = min(max(5, len(categories)//4), 25)`. With 645 modes and ~180 unique category labels, this gives 25 clusters. The formula has no empirical basis and may over- or under-merge.
+
+### Assessment
+
+Issues 1 (silent JSON failure), 6 (label drift), 12 (68 unqueried papers), and 13 (no negative validation) are the highest priority. Issues 4 (priority boost), 5 (query text), and 7 (confidence) are low impact. The remaining issues are medium priority and partially addressable during taxonomy assembly (Step 5).
+
+## 2026-03-22 — Investigation: 68 unqueried papers (249 - 181)
+
+Investigated why 68 papers in the ChromaDB vectorstore were never selected as candidates by Phase 1.
+
+### Root cause: `n_results` caps, NOT distance threshold
+
+Every single one of the 68 missing papers has chunks with similarity distance well below the 0.80 threshold. The problem is purely competitive exclusion from fixed-size result windows.
+
+### Mechanism 1: Seed query cap too small (affects ~57 papers)
+
+Phase 1 runs 11 seed queries with `n_results=40` each. The collection has 5,377 chunks across 249 papers. At 40 slots per query, papers whose most relevant chunk sits at rank 41+ for every query are systematically excluded.
+
+| Best rank of missing paper's chunk | Papers |
+|---|---|
+| rank ≤ 40 (would have been retrieved) | 0 |
+| rank 41–60 (one slot away) | 6 |
+| rank 61–100 | 16 |
+| rank > 100 | 52 |
+
+Example: paper `008-659-966-483-52X` (Explainable Document Level QA) has a chunk at distance 0.4591 on the "failure cases financial question answering" query, but the 40th slot goes to distance 0.4568 — a margin of 0.0023.
+
+### Mechanism 2: Section filter cap too small (affects ~11 papers)
+
+The section-type filter query (`where section_type in [error_analysis, limitations]`, `n_results=200`) is intended as a catch-all. However, the store contains 274 chunks with those section types, but the query only returns 200. The 74 least-similar chunks are silently dropped, and 11 missing papers have their only error_analysis/limitations chunk in positions 201-274.
+
+### Notable excluded papers
+
+The 68 missing papers include substantive work: BloombergGPT, FinSQL, Golden Touchstone, M³FinMeeting. These are not irrelevant papers — they were competitively excluded.
+
+### Fix (not yet implemented)
+
+Increase `n_results=40` to `80` or `100` in seed queries, and increase `n_results=200` to `400` (or use `collection.count()`) in the section filter. The 0.80 distance threshold does NOT need adjustment.
